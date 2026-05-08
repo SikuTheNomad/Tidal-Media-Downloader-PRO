@@ -37,8 +37,15 @@ namespace TIDALDL_UI.Else
             return sRet;
         }
 
-        private static string getExtension(string DlUrl)
+        private static string getExtension(string DlUrl, StreamUrl stream = null)
         {
+            // For DASH segmented streams, derive extension from codec rather than URL
+            if (stream?.SegmentUrls != null && stream.SegmentUrls.Length > 1)
+            {
+                if (stream.Codec != null && stream.Codec.ToUpper() == "FLAC")
+                    return ".flac";
+                return ".mp4";
+            }
             if (DlUrl.IndexOf(".flac") >= 0)
                 return ".flac";
             if (DlUrl.IndexOf(".mp4") >= 0)
@@ -147,7 +154,7 @@ namespace TIDALDL_UI.Else
             string title = FormatPath(track.Title + version, settings, false);
 
             //get extension
-            string extension = getExtension(stream.Url);
+            string extension = getExtension(stream.Url, stream);
 
             //base path
             string basepath = null;
@@ -213,7 +220,7 @@ namespace TIDALDL_UI.Else
             string title = FormatPath(track.Title, settings, false);
 
             //get extension
-            string extension = getExtension(stream.Url);
+            string extension = getExtension(stream.Url, stream);
 
             //base path
             string basepath = null;
@@ -335,6 +342,30 @@ namespace TIDALDL_UI.Else
                 return (null, newpath);
             }
             catch(Exception e)
+            {
+                return (e.Message, path);
+            }
+        }
+
+        public static (string, string) ConvertMp4ToFlac(string path)
+        {
+            if (path.ToLower().Contains(".mp4") == false)
+                return (null, path);
+
+            try
+            {
+                string newpath = path.Replace(".mp4", ".flac");
+                var inputFile = new MediaFile { Filename = path };
+                var outputFile = new MediaFile { Filename = newpath };
+                using (var engine = new Engine())
+                {
+                    engine.Convert(inputFile, outputFile);
+                }
+
+                System.IO.File.Delete(path);
+                return (null, newpath);
+            }
+            catch (Exception e)
             {
                 return (e.Message, path);
             }

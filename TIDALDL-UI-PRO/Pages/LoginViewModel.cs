@@ -212,31 +212,48 @@ namespace TIDALDL_UI.Pages
 
         public void CheckAuthThreadFunc(object[] datas)
         {
-            NetHelper.OpenWeb("https://" + DeviceCode.VerificationUri);
-
-            //Proxy
-            HttpHelper.ProxyInfo PROXY = Settings.ProxyEnable ? new HttpHelper.ProxyInfo(Settings.ProxyHost, Settings.ProxyPort, Settings.ProxyUser, Settings.ProxyPwd) : null;
-
-            (string msg, LoginKey key) = Client.CheckAuthStatus(DeviceCode, PROXY).Result;
-            if (msg.IsNotBlank())
+            try
             {
-                Growl.Error(msg, Global.TOKEN_LOGIN);
-                goto RETURN_POINT;
+                NetHelper.OpenWeb("https://" + DeviceCode.VerificationUri);
+
+                //Proxy
+                HttpHelper.ProxyInfo PROXY = Settings.ProxyEnable ? new HttpHelper.ProxyInfo(Settings.ProxyHost, Settings.ProxyPort, Settings.ProxyUser, Settings.ProxyPwd) : null;
+
+                (string msg, LoginKey key) = Client.CheckAuthStatus(DeviceCode, PROXY).Result;
+                if (msg.IsNotBlank())
+                {
+                    this.View.Dispatcher.Invoke(new Action(() => {
+                        Growl.Error(msg, Global.TOKEN_LOGIN);
+                    }));
+                    goto RETURN_POINT;
+                }
+
+                // Fetch full session to get CountryCode and other fields
+                (string sessionMsg, LoginKey sessionKey) = Client.Login(key.AccessToken, PROXY).Result;
+                if (sessionMsg.IsBlank() && sessionKey != null)
+                    key = sessionKey;
+
+                Settings.Userid = key.UserID;
+                Settings.Countrycode = key.CountryCode;
+                Settings.Accesstoken = key.AccessToken;
+                Settings.Refreshtoken = key.RefreshToken;
+                Settings.Save();
+                Global.AccessKey = key;
+                Global.CommonKey = key;
+                Global.VideoKey = key;
+
+                this.View.Dispatcher.Invoke(new Action(() => {
+                    Manager.ShowWindow(VMMain);
+                    RequestClose();
+                }));
             }
-
-            Settings.Userid = key.UserID;
-            Settings.Countrycode = key.CountryCode;
-            Settings.Accesstoken = key.AccessToken;
-            Settings.Refreshtoken = key.RefreshToken;
-            Settings.Save();
-            Global.AccessKey = key;
-            Global.CommonKey = key;
-            Global.VideoKey = key;
-
-            this.View.Dispatcher.Invoke(new Action(() => {
-                Manager.ShowWindow(VMMain);
-                RequestClose();
-            }));
+            catch (Exception e)
+            {
+                Exception inner = (e as AggregateException)?.InnerException ?? e;
+                this.View.Dispatcher.Invoke(new Action(() => {
+                    Growl.Error("Login failed: " + inner.Message, Global.TOKEN_LOGIN);
+                }));
+            }
 
         RETURN_POINT:
             BtnLoginEnable = true;

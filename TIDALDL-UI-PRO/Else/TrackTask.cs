@@ -115,47 +115,80 @@ namespace TIDALDL_UI.Else
 
                 //Download
                 Progress.StatusMsg = "Start...";
-                for (int i = 0; i < 50 && Progress.GetStatus() != ProgressHelper.STATUS.CANCLE; i++)
+                bool bDownloaded = false;
+
+                if (Stream.SegmentUrls != null && Stream.SegmentUrls.Length > 1)
                 {
-                    StartTime = TimeHelper.GetCurrentTime();
-                    if ((bool)DownloadFileHepler.Start(Stream.Url, path, Timeout: 5 * 1000, UpdateFunc: UpdateDownloadNotify, ErrFunc: ErrDownloadNotify, Proxy: key.Proxy))
+                    // DASH segmented stream: download all segments and concatenate
+                    bDownloaded = DownloadDashSegments(Stream.SegmentUrls, path, key);
+                    if (!bDownloaded)
                     {
-                        //Decrypt
-                        Progress.StatusMsg = "Decrypt...";
-                        if (!Tools.DecryptTrackFile(Stream, path))
-                        {
-                            Progress.Errmsg = "Decrypt failed!";
-                            goto ERR_RETURN;
-                        }
-
-                        if (Settings.OnlyM4a)
-                        {
-                            (Progress.Errmsg, path) = Tools.ConvertMp4ToM4a(path, Stream);
-                            if (Progress.Errmsg.IsNotBlank())
-                                goto ERR_RETURN;
-                        }
-
-                        //Get lyrics
-                        Progress.StatusMsg = "Get lyrics...";
-                        string lyrics = Client.GetLyrics(key, TidalTrack.Title, TidalTrack.Artist == null ? "" : TidalTrack.Artist.Name);
-
-                        //SetMetaData
-                        Progress.StatusMsg = "Set metaData...";
-                        if (TidalAlbum == null)
-                            (Progress.Errmsg, TidalAlbum) = Client.GetAlbum(key, TidalTrack.Album.ID, false).Result;
-                        Progress.Errmsg = Tools.SetMetaData(path, TidalAlbum, TidalTrack, lyrics);
-                        if (Progress.Errmsg.IsNotBlank())
-                        {
-                            Progress.Errmsg = "Set metadata failed!" + Progress.Errmsg;
-                            goto ERR_RETURN;
-                        }
-
-                        Progress.SetStatus(ProgressHelper.STATUS.COMPLETE);
-                        goto CALL_RETURN;
+                        Progress.Errmsg = "DASH segment download failed!";
+                        goto ERR_RETURN;
                     }
                 }
-                Progress.Errmsg = "Download failed!";
-                System.IO.File.Delete(path);
+                else
+                {
+                    for (int i = 0; i < 50 && Progress.GetStatus() != ProgressHelper.STATUS.CANCLE; i++)
+                    {
+                        StartTime = TimeHelper.GetCurrentTime();
+                        if ((bool)DownloadFileHepler.Start(Stream.Url, path, Timeout: 5 * 1000, UpdateFunc: UpdateDownloadNotify, ErrFunc: ErrDownloadNotify, Proxy: key.Proxy))
+                        {
+                            bDownloaded = true;
+                            break;
+                        }
+                    }
+                    if (!bDownloaded)
+                    {
+                        Progress.Errmsg = "Download failed!";
+                        System.IO.File.Delete(path);
+                        goto ERR_RETURN;
+                    }
+                }
+
+                {
+                    //Decrypt (DASH streams are unencrypted; legacy streams may be encrypted)
+                    Progress.StatusMsg = "Decrypt...";
+                    if (!Tools.DecryptTrackFile(Stream, path))
+                    {
+                        Progress.Errmsg = "Decrypt failed!";
+                        goto ERR_RETURN;
+                    }
+
+                    // DASH FLAC: remux mp4 container to .flac
+                    if (Stream.SegmentUrls != null && Stream.SegmentUrls.Length > 1
+                        && Stream.Codec != null && Stream.Codec.ToUpper() == "FLAC"
+                        && path.ToLower().EndsWith(".flac") == false)
+                    {
+                        (Progress.Errmsg, path) = Tools.ConvertMp4ToFlac(path);
+                        if (Progress.Errmsg.IsNotBlank())
+                            goto ERR_RETURN;
+                    }
+                    else if (Settings.OnlyM4a)
+                    {
+                        (Progress.Errmsg, path) = Tools.ConvertMp4ToM4a(path, Stream);
+                        if (Progress.Errmsg.IsNotBlank())
+                            goto ERR_RETURN;
+                    }
+
+                    //Get lyrics
+                    Progress.StatusMsg = "Get lyrics...";
+                    string lyrics = Client.GetLyrics(key, TidalTrack.Title, TidalTrack.Artist == null ? "" : TidalTrack.Artist.Name);
+
+                    //SetMetaData
+                    Progress.StatusMsg = "Set metaData...";
+                    if (TidalAlbum == null)
+                        (Progress.Errmsg, TidalAlbum) = Client.GetAlbum(key, TidalTrack.Album.ID, false).Result;
+                    Progress.Errmsg = Tools.SetMetaData(path, TidalAlbum, TidalTrack, lyrics);
+                    if (Progress.Errmsg.IsNotBlank())
+                    {
+                        Progress.Errmsg = "Set metadata failed!" + Progress.Errmsg;
+                        goto ERR_RETURN;
+                    }
+
+                    Progress.SetStatus(ProgressHelper.STATUS.COMPLETE);
+                    goto CALL_RETURN;
+                }
             }
             catch(Exception e)
             {
@@ -171,6 +204,54 @@ namespace TIDALDL_UI.Else
             TellParentOver();
 
             DownloadSpeedString = "";
+        }
+
+        private bool DownloadDashSegments(string[] segmentUrls, string outputPath, LoginKey key)
+        {
+            try
+            {
+                string tempDir = System.IO.Path.GetTempPath();
+                string baseName = System.IO.Path.GetFileNameWithoutExtension(outputPath);
+                var segPaths = new System.Collections.Generic.List<string>();
+
+                for (int s = 0; s < segmentUrls.Length; s++)
+                {
+                    if (Progress.GetStatus() == ProgressHelper.STATUS.CANCLE)
+                        return false;
+
+                    string segPath = System.IO.Path.Combine(tempDir, $"{baseName}_seg{s}.tmp");
+                    Progress.StatusMsg = $"Downloading segment {s + 1}/{segmentUrls.Length}...";
+
+                    bool ok = false;
+                    for (int retry = 0; retry < 5 && !ok; retry++)
+                    {
+                        ok = (bool)DownloadFileHepler.Start(segmentUrls[s], segPath, Timeout: 30 * 1000, Proxy: key.Proxy);
+                    }
+                    if (!ok)
+                    {
+                        foreach (var p in segPaths) try { System.IO.File.Delete(p); } catch { }
+                        return false;
+                    }
+                    segPaths.Add(segPath);
+
+                    Progress.UpdateInt(s + 1, segmentUrls.Length);
+                }
+
+                using (var outStream = new System.IO.FileStream(outputPath, System.IO.FileMode.Create))
+                {
+                    foreach (string segPath in segPaths)
+                    {
+                        byte[] data = System.IO.File.ReadAllBytes(segPath);
+                        outStream.Write(data, 0, data.Length);
+                        System.IO.File.Delete(segPath);
+                    }
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public void ErrDownloadNotify(long lTotalSize, long lAlreadyDownloadSize, string sErrMsg, object data)

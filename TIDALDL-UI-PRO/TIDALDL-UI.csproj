@@ -461,6 +461,15 @@
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />
   </ItemGroup>
+  <!-- Explicit weaver paths for Fody compatibility with newer VS/MSBuild -->
+  <ItemGroup>
+    <WeaverFiles Include="$(MSBuildProjectDirectory)\packages\PropertyChanged.Fody.3.3.3\weaver\PropertyChanged.Fody.dll"
+                 Condition="Exists('$(MSBuildProjectDirectory)\packages\PropertyChanged.Fody.3.3.3\weaver\PropertyChanged.Fody.dll')" />
+    <WeaverFiles Include="$(MSBuildProjectDirectory)\packages\Costura.Fody.5.3.0\netstandardweaver\Costura.Fody.dll"
+                 Condition="'$(MSBuildRuntimeType)' == 'Core' AND Exists('$(MSBuildProjectDirectory)\packages\Costura.Fody.5.3.0\netstandardweaver\Costura.Fody.dll')" />
+    <WeaverFiles Include="$(MSBuildProjectDirectory)\packages\Costura.Fody.5.3.0\netclassicweaver\Costura.Fody.dll"
+                 Condition="'$(MSBuildRuntimeType)' != 'Core' AND Exists('$(MSBuildProjectDirectory)\packages\Costura.Fody.5.3.0\netclassicweaver\Costura.Fody.dll')" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="packages\Fody.6.5.1\build\Fody.targets" Condition="Exists('packages\Fody.6.5.1\build\Fody.targets')" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
