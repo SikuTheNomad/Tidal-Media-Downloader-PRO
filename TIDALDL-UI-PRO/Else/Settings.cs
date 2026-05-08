@@ -150,6 +150,13 @@ namespace TIDALDL_UI.Else
         [JsonProperty("VideoFileFormat")]
         public string VideoFileFormat { get; set; } = "{ArtistName}/{TrackNumber} - {VideoTitle}{ExplicitFlag}";
 
+        //API credentials
+        [JsonProperty("ClientId")]
+        public string ClientId { get; set; } = null;
+
+        [JsonProperty("ClientSecret")]
+        public string ClientSecret { get; set; } = null;
+
 
         public static void Change(Settings newItem, Settings oldItem = null)
         {
@@ -159,6 +166,7 @@ namespace TIDALDL_UI.Else
                 Language.Change(newItem.LanguageType);
             if (oldItem == null || oldItem.ThreadNum != newItem.ThreadNum)
                 ThreadTool.SetThreadNum(newItem.ThreadNum);
+            TidalLib.Client.SetClientCredentials(newItem.ClientId, newItem.ClientSecret);
         }
 
         public bool Save()
